@@ -26,6 +26,159 @@ This microservice handles complete subscription lifecycle management including u
 - CRON-based automatic subscription expiration
 - Comprehensive subscription history and analytics
 
+## 🌐 Hosted API
+
+The API is hosted and ready to use at:
+```
+https://subscription-assignment.onrender.com
+```
+
+You can directly test the endpoints using Postman without local setup. All endpoints are prefixed with the base URL.
+
+### Quick Start with Hosted API
+
+1. **Register a User**
+```http
+POST https://subscription-assignment.onrender.com/api/auth/signup
+Content-Type: application/json
+
+{
+  "name": "Test User",
+  "email": "test@example.com",
+  "password": "password123"
+}
+```
+
+2. **Use the returned JWT token in Authorization header for all other requests**
+```http
+Authorization: Bearer your-jwt-token
+```
+
+## 📚 API Endpoints Reference
+
+### Authentication Endpoints
+
+1. **Sign Up**
+```http
+POST https://subscription-assignment.onrender.com/api/auth/signup
+Content-Type: application/json
+
+{
+  "name": "John Doe",
+  "email": "john@example.com",
+  "password": "securepassword"
+}
+```
+
+2. **Login**
+```http
+POST https://subscription-assignment.onrender.com/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "john@example.com",
+  "password": "securepassword"
+}
+```
+
+### Subscription Management Endpoints
+
+1. **Create Subscription**
+```http
+POST https://subscription-assignment.onrender.com/api/subscriptions/:userId
+Authorization: Bearer <jwt-token>
+Content-Type: application/json
+
+{
+  "planId": "plan-id"
+}
+```
+
+2. **Get User's Subscription History**
+```http
+GET https://subscription-assignment.onrender.com/api/subscriptions/:userId
+Authorization: Bearer <jwt-token>
+```
+
+3. **Update Subscription Plan**
+```http
+PUT https://subscription-assignment.onrender.com/api/subscriptions/:userId
+Authorization: Bearer <jwt-token>
+Content-Type: application/json
+
+{
+  "planId": "new-plan-id"
+}
+```
+
+4. **Cancel Subscription**
+```http
+DELETE https://subscription-assignment.onrender.com/api/subscriptions/:userId
+Authorization: Bearer <jwt-token>
+```
+
+5. **Reactivate Subscription**
+```http
+POST https://subscription-assignment.onrender.com/api/subscriptions/:userId/reactivate
+Authorization: Bearer <jwt-token>
+Content-Type: application/json
+
+{
+  "planId": "plan-id"
+}
+```
+
+### Plan Management Endpoints
+
+1. **Get All Plans**
+```http
+GET https://subscription-assignment.onrender.com/api/plans
+Authorization: Bearer <jwt-token>
+```
+
+### Sample Response Formats
+
+1. **Successful Subscription Creation**
+```json
+{
+  "success": true,
+  "message": "Subscription created successfully",
+  "data": {
+    "_id": "subscription-id",
+    "status": "ACTIVE",
+    "startDate": "2024-03-20T10:00:00.000Z",
+    "endDate": "2024-04-19T10:00:00.000Z",
+    "planId": {
+      "name": "Premium Plan",
+      "price": 29.99,
+      "features": ["Feature 1", "Feature 2"]
+    }
+  }
+}
+```
+
+2. **Subscription Update Response**
+```json
+{
+  "success": true,
+  "message": "Subscription updated successfully from Basic Plan to Premium Plan",
+  "data": {
+    "status": "ACTIVE",
+    "startDate": "2024-03-20T10:00:00.000Z",
+    "endDate": "2024-04-19T10:00:00.000Z",
+    "priceChange": 10.00
+  }
+}
+```
+
+3. **Error Response Format**
+```json
+{
+  "success": false,
+  "message": "Error description here"
+}
+```
+
 ## Architecture
 
 The system follows Clean Architecture principles with clear separation of concerns:
