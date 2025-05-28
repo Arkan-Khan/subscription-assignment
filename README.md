@@ -131,9 +131,13 @@ The system follows Clean Architecture principles with clear separation of concer
 
 ### Email Notification System
 - **FIFO message queue** using Redis for ordered email processing
-- **Asynchronous processing** with retry mechanism (up to 3 attempts)
+- **Asynchronous processing** with retry mechanism
 - **Beautiful HTML templates** with responsive design
-- **Event-driven notifications** for signup, subscription changes, expiration
+- **Event Types**:
+  - `subscription_created`: New subscription creation
+  - `subscription_updated`: Plan changes with price difference
+  - `subscription_cancelled`: Cancellation with remaining access period
+  - `subscription_expired`: Automatic expiration via CRON
 
 ### Performance Features
 - **Redis caching** for plan data to improve response times
@@ -220,10 +224,38 @@ Content-Type: application/json
 }
 ```
 
+Response:
+```json
+{
+  "success": true,
+  "message": "Subscription updated successfully from Basic Plan to Premium Plan",
+  "data": {
+    "_id": "subscription-id",
+    "status": "ACTIVE",
+    "startDate": "2024-03-20T10:00:00.000Z",
+    "endDate": "2024-04-19T10:00:00.000Z",
+    "priceChange": 10.00
+  }
+}
+```
+
 #### Cancel Subscription
 ```http
 DELETE /api/subscriptions/:userId
 Authorization: Bearer <jwt-token>
+```
+
+Response:
+```json
+{
+  "success": true,
+  "message": "Subscription cancelled successfully. Service access will continue until 2024-04-19T10:00:00.000Z",
+  "data": {
+    "_id": "subscription-id",
+    "status": "CANCELLED",
+    "endDate": "2024-04-19T10:00:00.000Z"
+  }
+}
 ```
 
 #### Reactivate Subscription
@@ -237,6 +269,40 @@ Content-Type: application/json
 }
 ```
 
+Response:
+```json
+{
+  "success": true,
+  "message": "Subscription reactivated successfully. Changed from Basic Plan to Premium Plan",
+  "data": {
+    "_id": "subscription-id",
+    "status": "ACTIVE",
+    "startDate": "2024-03-20T10:00:00.000Z",
+    "endDate": "2024-04-19T10:00:00.000Z",
+    "previousStatus": "CANCELLED",
+    "priceChange": 10.00
+  }
+}
+```
+
+### Validation Rules
+
+1. **Plan Updates**
+   - Cannot update to the same plan
+   - Plan must be active
+   - Only ACTIVE subscriptions can be updated
+
+2. **Cancellation**
+   - Cannot cancel already CANCELLED subscription
+   - Cannot cancel EXPIRED subscription
+   - Access continues until original end date
+
+3. **Reactivation**
+   - Cannot reactivate if user has an ACTIVE subscription
+   - Only CANCELLED or EXPIRED subscriptions can be reactivated
+   - New plan must be active
+   - No email notification sent
+
 ### Plan Management
 
 #### Get All Plans
@@ -248,7 +314,7 @@ Returns cached plan data including pricing, features, and duration information.
 
 ## Subscription State Management
 
-### States and Transitions
+### State Transitions
 
 ```mermaid
 stateDiagram-v2
@@ -256,35 +322,29 @@ stateDiagram-v2
     ACTIVE --> CANCELLED : User Cancels
     ACTIVE --> EXPIRED : Auto-Expire (CRON)
     CANCELLED --> EXPIRED : Auto-Expire (CRON)
-    EXPIRED --> ACTIVE : Reactivate
-    CANCELLED --> ACTIVE : Reactivate
-    ACTIVE --> ACTIVE : Update Plan
+    EXPIRED --> ACTIVE : Reactivate (if no active subscription)
+    CANCELLED --> ACTIVE : Reactivate (if no active subscription)
+    ACTIVE --> ACTIVE : Update Plan (different plan only)
 ```
-
-### State Definitions
-
-| State | Description | Triggers | User Access |
-|-------|-------------|----------|-------------|
-| **ACTIVE** | Subscription is valid and current | New subscription, reactivation, plan update | Full access |
-| **CANCELLED** | User cancelled but still has access until end date | Manual cancellation via DELETE endpoint | Access until end_date |
-| **EXPIRED** | Subscription has passed end date | CRON job auto-expiration | No access |
 
 ### State Management Rules
 
 1. **ACTIVE Subscriptions**
-   - Can be updated to different plans
+   - Can be updated to different plans only (not same plan)
    - Can be cancelled (becomes CANCELLED)
    - Auto-expire when end_date reached
+   - Only one active subscription per user
 
 2. **CANCELLED Subscriptions**
    - Maintain access until original end_date
-   - Cannot be updated (must reactivate first)
+   - Cannot be updated (must reactivate)
+   - Cannot be cancelled again
    - Auto-expire to EXPIRED when end_date reached
 
 3. **EXPIRED Subscriptions**
    - No service access
-   - Can be reactivated with new plan
-   - Can create entirely new subscription
+   - Can be reactivated if no active subscription exists
+   - Can create new subscription if no active/cancelled exists
 
 ## System Workflows
 
