@@ -32,7 +32,7 @@ The API is hosted and ready to use at:
 ```
 https://subscription-assignment.onrender.com/
 ```
-got to this url for health check: 
+go to this url for health check: 
 ```
 https://subscription-assignment.onrender.com/health
 ```
