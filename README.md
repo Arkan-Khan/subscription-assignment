@@ -80,8 +80,8 @@ The system follows Clean Architecture principles with clear separation of concer
 
 1. **Clone and setup**
    ```bash
-   git clone <repository-url>
-   cd subscription-service
+   git clone https://github.com/Arkan-Khan/subscription-assignment.git
+   cd subscription-assignment
    npm install
    ```
 
@@ -99,9 +99,6 @@ The system follows Clean Architecture principles with clear separation of concer
    UPSTASH_REDIS_REST_URL=your-upstash-redis-url
    UPSTASH_REDIS_REST_TOKEN=your-upstash-redis-token
    
-   # Email Service
-   RESEND_API_KEY=your-resend-api-key
-   
    # Server
    PORT=3000
    ```
@@ -109,6 +106,7 @@ The system follows Clean Architecture principles with clear separation of concer
 3. **Start the service**
    ```bash
    # Development
+   node seed.js
    npm run dev
    
    # Production
