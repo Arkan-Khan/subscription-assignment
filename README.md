@@ -30,9 +30,12 @@ This microservice handles complete subscription lifecycle management including u
 
 The API is hosted and ready to use at:
 ```
-https://subscription-assignment.onrender.com/health health check
+https://subscription-assignment.onrender.com/
 ```
-
+got to this url for health check: 
+```
+https://subscription-assignment.onrender.com/health
+```
 You can directly test the endpoints using Postman without local setup. All endpoints are prefixed with the base URL.
 
 ### Quick Start with Hosted API
