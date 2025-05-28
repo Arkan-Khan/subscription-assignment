@@ -20,17 +20,26 @@ const planSchema = z.object({
   duration: z.number().min(1, 'Duration must be at least 1 day')
 });
 
+// MongoDB ObjectId regex pattern
+const objectIdRegex = /^[0-9a-fA-F]{24}$/;
+
 // Subscription validation schemas
 const createSubscriptionSchema = z.object({
-  planId: z.string().min(1, 'Plan ID is required')
+  planId: z.string()
+    .min(1, 'Plan ID is required')
+    .regex(objectIdRegex, 'Invalid Plan ID format - must be a valid MongoDB ObjectId')
 });
 
 const updateSubscriptionSchema = z.object({
-  planId: z.string().min(1, 'Plan ID is required')
+  planId: z.string()
+    .min(1, 'Plan ID is required')
+    .regex(objectIdRegex, 'Invalid Plan ID format - must be a valid MongoDB ObjectId')
 });
 
 const reactivateSubscriptionSchema = z.object({
-  planId: z.string().min(1, 'Plan ID is required')
+  planId: z.string()
+    .min(1, 'Plan ID is required')
+    .regex(objectIdRegex, 'Invalid Plan ID format - must be a valid MongoDB ObjectId')
 });
 
 module.exports = {

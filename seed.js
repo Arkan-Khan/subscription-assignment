@@ -19,6 +19,16 @@ console.log('JWT_SECRET:', process.env.JWT_SECRET ? 'Loaded ‚úÖ' : 'Not found ‚ù
 
 const samplePlans = [
   {
+    name: 'Test2Min',
+    price: 1,
+    features: [
+      'Test plan that expires in 2 minutes',
+      'For testing subscription expiration'
+    ],
+    duration: 0.00139, // 2 minutes in days (2 / (24 * 60))
+    isActive: true
+  },
+  {
     name: 'Free',
     price: 0,
     features: [

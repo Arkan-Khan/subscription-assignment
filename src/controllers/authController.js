@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const { addEmailJob } = require('../services/queueService');
 
 const generateToken = (userId) => {
   return jwt.sign({ userId }, process.env.JWT_SECRET, {
@@ -34,6 +35,13 @@ const signup = async (req, res) => {
 
     // Generate token
     const token = generateToken(user._id);
+
+    // Send welcome email
+    await addEmailJob({
+      type: 'user_signup',
+      email: user.email,
+      name: user.name
+    });
 
     res.status(201).json({
       success: true,

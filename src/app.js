@@ -4,6 +4,7 @@ require('dotenv').config();
 
 const connectDB = require('./utils/database');
 const { client } = require('./utils/redis');
+const { scheduleExpirationChecks } = require('./services/subscriptionService');
 
 // Import routes
 const authRoutes = require('./routes/auth');
@@ -52,6 +53,7 @@ app.use((error, req, res, next) => {
 const initializeApp = async () => {
   try {
     await connectDB();
+    scheduleExpirationChecks();
     console.log('✅ All connections established');
   } catch (error) {
     console.error('❌ Failed to initialize app:', error);

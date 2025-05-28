@@ -1,6 +1,7 @@
 const Subscription = require('../models/Subscription');
 const Plan = require('../models/Plan');
 const User = require('../models/User');
+const { addEmailJob } = require('../services/queueService');
 
 const createSubscription = async (req, res) => {
   try {
@@ -33,12 +34,16 @@ const createSubscription = async (req, res) => {
       });
     }
 
-    // Check if user already has a subscription
-    const existingSubscription = await Subscription.findOne({ userId });
+    // Check if user has an active subscription
+    const existingSubscription = await Subscription.findOne({ 
+      userId,
+      status: { $nin: ['EXPIRED', 'CANCELLED'] } // Exclude expired and cancelled subscriptions
+    });
+    
     if (existingSubscription) {
       return res.status(400).json({
         success: false,
-        message: 'User already has a subscription'
+        message: 'User already has an active subscription'
       });
     }
 
@@ -59,6 +64,16 @@ const createSubscription = async (req, res) => {
     // Populate plan details
     await subscription.populate('planId');
     await subscription.populate('userId', 'name email');
+
+    // Add email notification to queue
+    await addEmailJob({
+      type: 'subscription_created',
+      email: user.email,
+      name: user.name,
+      planName: plan.name,
+      startDate: startDate.toISOString(),
+      endDate: endDate.toISOString()
+    });
 
     res.status(201).json({
       success: true,
@@ -87,28 +102,38 @@ const getUserSubscription = async (req, res) => {
       });
     }
 
-    const subscription = await Subscription.findOne({ userId })
+    // Get all subscriptions for the user
+    const subscriptions = await Subscription.find({ userId })
       .populate('planId')
-      .populate('userId', 'name email');
+      .populate('userId', 'name email')
+      .sort({ createdAt: -1 }); // Most recent first
 
-    if (!subscription) {
+    if (!subscriptions || subscriptions.length === 0) {
       return res.status(404).json({
         success: false,
-        message: 'No subscription found for this user'
+        message: 'No subscription history found for this user'
       });
     }
 
-    // Check if subscription has expired
-    const now = new Date();
-    if (subscription.status === 'ACTIVE' && now > subscription.endDate) {
-      subscription.status = 'EXPIRED';
-      await subscription.save();
-    }
+    // Find active subscription if exists
+    const activeSubscription = subscriptions.find(sub => sub.status === 'ACTIVE');
+
+    // Group subscriptions by status
+    const subscriptionHistory = {
+      active: activeSubscription || null,
+      expired: subscriptions.filter(sub => sub.status === 'EXPIRED'),
+      cancelled: subscriptions.filter(sub => sub.status === 'CANCELLED'),
+      total: subscriptions.length
+    };
 
     res.json({
       success: true,
-      message: 'Subscription retrieved successfully',
-      data: subscription
+      message: 'Subscription history retrieved successfully',
+      data: {
+        currentSubscription: activeSubscription || null,
+        history: subscriptionHistory,
+        allSubscriptions: subscriptions
+      }
     });
   } catch (error) {
     console.error('Get subscription error:', error);
@@ -121,23 +146,19 @@ const getUserSubscription = async (req, res) => {
 
 const updateSubscription = async (req, res) => {
   try {
-    const { userId } = req.params;
     const { planId } = req.body;
+    const userId = req.params.userId;
 
-    // Validate required fields
-    if (!planId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Plan ID is required'
-      });
-    }
+    // Find user's active subscription
+    const subscription = await Subscription.findOne({ 
+      userId,
+      status: 'ACTIVE'
+    });
 
-    // Check if user exists
-    const user = await User.findById(userId);
-    if (!user) {
+    if (!subscription) {
       return res.status(404).json({
         success: false,
-        message: 'User not found'
+        message: 'No active subscription found'
       });
     }
 
@@ -150,36 +171,29 @@ const updateSubscription = async (req, res) => {
       });
     }
 
-    // Find subscription
-    const subscription = await Subscription.findOne({ userId });
-    if (!subscription) {
-      return res.status(404).json({
-        success: false,
-        message: 'No subscription found for this user'
-      });
-    }
+    // Get user details
+    const user = await User.findById(userId);
 
-    // Check if subscription can be updated
-    if (subscription.status === 'CANCELLED' || subscription.status === 'EXPIRED') {
-      return res.status(400).json({
-        success: false,
-        message: 'Cannot update cancelled or expired subscription'
-      });
-    }
+    // Calculate new end date
+    const startDate = new Date();
+    const endDate = new Date(startDate.getTime() + (plan.duration * 24 * 60 * 60 * 1000));
 
     // Update subscription
     subscription.planId = planId;
-    
-    // Recalculate end date based on new plan duration
-    const now = new Date();
-    subscription.endDate = new Date(now.getTime() + (plan.duration * 24 * 60 * 60 * 1000));
-    subscription.status = 'ACTIVE';
+    subscription.startDate = startDate;
+    subscription.endDate = endDate;
 
     await subscription.save();
 
-    // Populate plan details
-    await subscription.populate('planId');
-    await subscription.populate('userId', 'name email');
+    // Add email notification to queue
+    await addEmailJob({
+      type: 'subscription_updated',
+      email: user.email,
+      name: user.name,
+      planName: plan.name,
+      startDate: startDate.toISOString(),
+      endDate: endDate.toISOString()
+    });
 
     res.json({
       success: true,
@@ -197,41 +211,37 @@ const updateSubscription = async (req, res) => {
 
 const cancelSubscription = async (req, res) => {
   try {
-    const { userId } = req.params;
+    const userId = req.params.userId;
 
-    // Check if user exists
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: 'User not found'
-      });
-    }
+    // Find user's active subscription
+    const subscription = await Subscription.findOne({ 
+      userId,
+      status: 'ACTIVE'
+    });
 
-    // Find subscription
-    const subscription = await Subscription.findOne({ userId });
     if (!subscription) {
       return res.status(404).json({
         success: false,
-        message: 'No subscription found for this user'
+        message: 'No active subscription found'
       });
     }
 
-    // Check if already cancelled
-    if (subscription.status === 'CANCELLED') {
-      return res.status(400).json({
-        success: false,
-        message: 'Subscription is already cancelled'
-      });
-    }
+    // Get user and plan details
+    const user = await User.findById(userId);
+    const plan = await Plan.findById(subscription.planId);
 
-    // Cancel subscription
+    // Update subscription status
     subscription.status = 'CANCELLED';
     await subscription.save();
 
-    // Populate plan details
-    await subscription.populate('planId');
-    await subscription.populate('userId', 'name email');
+    // Add email notification to queue
+    await addEmailJob({
+      type: 'subscription_cancelled',
+      email: user.email,
+      name: user.name,
+      planName: plan.name,
+      cancelDate: new Date().toISOString()
+    });
 
     res.json({
       success: true,
@@ -249,15 +259,19 @@ const cancelSubscription = async (req, res) => {
 
 const reactivateSubscription = async (req, res) => {
   try {
-    const { userId } = req.params;
     const { planId } = req.body;
+    const userId = req.params.userId;
 
-    // Check if user exists
-    const user = await User.findById(userId);
-    if (!user) {
+    // Find user's cancelled or expired subscription
+    const subscription = await Subscription.findOne({ 
+      userId,
+      status: { $in: ['CANCELLED', 'EXPIRED'] }
+    });
+
+    if (!subscription) {
       return res.status(404).json({
         success: false,
-        message: 'User not found'
+        message: 'No cancelled or expired subscription found'
       });
     }
 
@@ -270,38 +284,30 @@ const reactivateSubscription = async (req, res) => {
       });
     }
 
-    // Find subscription
-    const subscription = await Subscription.findOne({ userId });
-    if (!subscription) {
-      return res.status(404).json({
-        success: false,
-        message: 'No subscription found for this user'
-      });
-    }
+    // Get user details
+    const user = await User.findById(userId);
 
-    // Check if subscription is cancelled
-    if (subscription.status !== 'CANCELLED') {
-      return res.status(400).json({
-        success: false,
-        message: 'Only cancelled subscriptions can be reactivated'
-      });
-    }
-
-    // Calculate new end date based on plan duration
-    const now = new Date();
-    const endDate = new Date(now.getTime() + (plan.duration * 24 * 60 * 60 * 1000));
+    // Calculate new dates
+    const startDate = new Date();
+    const endDate = new Date(startDate.getTime() + (plan.duration * 24 * 60 * 60 * 1000));
 
     // Update subscription
     subscription.planId = planId;
-    subscription.status = 'ACTIVE';
-    subscription.startDate = now;
+    subscription.startDate = startDate;
     subscription.endDate = endDate;
+    subscription.status = 'ACTIVE';
 
     await subscription.save();
 
-    // Populate plan details
-    await subscription.populate('planId');
-    await subscription.populate('userId', 'name email');
+    // Add email notification to queue
+    await addEmailJob({
+      type: 'subscription_created',
+      email: user.email,
+      name: user.name,
+      planName: plan.name,
+      startDate: startDate.toISOString(),
+      endDate: endDate.toISOString()
+    });
 
     res.json({
       success: true,
