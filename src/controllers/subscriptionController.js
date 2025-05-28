@@ -2,17 +2,26 @@ const Subscription = require('../models/Subscription');
 const Plan = require('../models/Plan');
 const User = require('../models/User');
 const { addEmailJob } = require('../services/queueService');
+const mongoose = require('mongoose');
 
 const createSubscription = async (req, res) => {
   try {
     const { planId } = req.body;
     const userId = req.params.userId;
 
-    // Validate required fields
-    if (!planId) {
+    // Check if userId is valid MongoDB ObjectId
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
       return res.status(400).json({
         success: false,
-        message: 'Plan ID is required'
+        message: 'Invalid user ID format'
+      });
+    }
+
+    // Check if planId is valid MongoDB ObjectId
+    if (!mongoose.Types.ObjectId.isValid(planId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid plan ID format'
       });
     }
 
@@ -25,7 +34,7 @@ const createSubscription = async (req, res) => {
       });
     }
 
-    // Check if plan exists
+    // Check if plan exists and is active
     const plan = await Plan.findById(planId);
     if (!plan) {
       return res.status(404).json({
@@ -34,16 +43,38 @@ const createSubscription = async (req, res) => {
       });
     }
 
-    // Check if user has an active subscription
+    if (!plan.isActive) {
+      return res.status(400).json({
+        success: false,
+        message: 'This plan is no longer available'
+      });
+    }
+
+    // Check if user has any subscription (active, cancelled, or expired)
     const existingSubscription = await Subscription.findOne({ 
       userId,
-      status: { $nin: ['EXPIRED', 'CANCELLED'] } // Exclude expired and cancelled subscriptions
+      status: { $nin: ['EXPIRED'] } // Only allow if all subscriptions are expired
     });
     
     if (existingSubscription) {
+      if (existingSubscription.status === 'ACTIVE') {
+        return res.status(400).json({
+          success: false,
+          message: 'User already has an active subscription'
+        });
+      } else if (existingSubscription.status === 'CANCELLED') {
+        return res.status(400).json({
+          success: false,
+          message: 'User has a cancelled subscription. Please wait for it to expire or use the reactivate endpoint'
+        });
+      }
+    }
+
+    // Validate plan duration
+    if (!plan.duration || plan.duration <= 0) {
       return res.status(400).json({
         success: false,
-        message: 'User already has an active subscription'
+        message: 'Invalid plan duration'
       });
     }
 
@@ -51,12 +82,21 @@ const createSubscription = async (req, res) => {
     const startDate = new Date();
     const endDate = new Date(startDate.getTime() + (plan.duration * 24 * 60 * 60 * 1000));
 
+    // Validate calculated dates
+    if (endDate <= startDate) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid plan duration: End date must be after start date'
+      });
+    }
+
     // Create subscription
     const subscription = new Subscription({
       userId,
       planId,
       startDate,
-      endDate
+      endDate,
+      status: 'ACTIVE'
     });
 
     await subscription.save();
@@ -72,7 +112,9 @@ const createSubscription = async (req, res) => {
       name: user.name,
       planName: plan.name,
       startDate: startDate.toISOString(),
-      endDate: endDate.toISOString()
+      endDate: endDate.toISOString(),
+      price: plan.price,
+      features: plan.features
     });
 
     res.status(201).json({
@@ -93,6 +135,14 @@ const getUserSubscription = async (req, res) => {
   try {
     const { userId } = req.params;
 
+    // Validate userId format
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid user ID format'
+      });
+    }
+
     // Check if user exists
     const user = await User.findById(userId);
     if (!user) {
@@ -102,16 +152,30 @@ const getUserSubscription = async (req, res) => {
       });
     }
 
-    // Get all subscriptions for the user
+    // Get all subscriptions for the user with proper sorting and population
     const subscriptions = await Subscription.find({ userId })
       .populate('planId')
       .populate('userId', 'name email')
-      .sort({ createdAt: -1 }); // Most recent first
+      .sort({ 
+        status: 1, // Active first
+        startDate: -1 // Most recent first
+      });
 
+    // Return empty history if no subscriptions
     if (!subscriptions || subscriptions.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'No subscription history found for this user'
+      return res.json({
+        success: true,
+        message: 'No subscription history found',
+        data: {
+          currentSubscription: null,
+          history: {
+            active: null,
+            expired: [],
+            cancelled: [],
+            total: 0
+          },
+          allSubscriptions: []
+        }
       });
     }
 
@@ -149,11 +213,26 @@ const updateSubscription = async (req, res) => {
     const { planId } = req.body;
     const userId = req.params.userId;
 
+    // Validate IDs
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid user ID format'
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(planId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid plan ID format'
+      });
+    }
+
     // Find user's active subscription
     const subscription = await Subscription.findOne({ 
       userId,
       status: 'ACTIVE'
-    });
+    }).populate('planId');
 
     if (!subscription) {
       return res.status(404).json({
@@ -162,21 +241,55 @@ const updateSubscription = async (req, res) => {
       });
     }
 
-    // Check if plan exists
-    const plan = await Plan.findById(planId);
-    if (!plan) {
+    // Check if trying to update to the same plan
+    if (subscription.planId._id.toString() === planId) {
+      return res.status(400).json({
+        success: false,
+        message: 'You are already subscribed to this plan'
+      });
+    }
+
+    // Check if plan exists and is active
+    const newPlan = await Plan.findById(planId);
+    if (!newPlan) {
       return res.status(404).json({
         success: false,
         message: 'Plan not found'
       });
     }
 
+    if (!newPlan.isActive) {
+      return res.status(400).json({
+        success: false,
+        message: 'The requested plan is no longer available'
+      });
+    }
+
+    // Validate plan duration
+    if (!newPlan.duration || newPlan.duration <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid plan duration'
+      });
+    }
+
     // Get user details
     const user = await User.findById(userId);
 
+    // Store old plan details for email notification
+    const oldPlan = subscription.planId;
+
     // Calculate new end date
     const startDate = new Date();
-    const endDate = new Date(startDate.getTime() + (plan.duration * 24 * 60 * 60 * 1000));
+    const endDate = new Date(startDate.getTime() + (newPlan.duration * 24 * 60 * 60 * 1000));
+
+    // Validate calculated dates
+    if (endDate <= startDate) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid plan duration: End date must be after start date'
+      });
+    }
 
     // Update subscription
     subscription.planId = planId;
@@ -184,20 +297,27 @@ const updateSubscription = async (req, res) => {
     subscription.endDate = endDate;
 
     await subscription.save();
+    await subscription.populate('planId'); // Repopulate with new plan details
 
     // Add email notification to queue
     await addEmailJob({
       type: 'subscription_updated',
       email: user.email,
       name: user.name,
-      planName: plan.name,
+      oldPlanName: oldPlan.name,
+      newPlanName: newPlan.name,
       startDate: startDate.toISOString(),
-      endDate: endDate.toISOString()
+      endDate: endDate.toISOString(),
+      priceChange: {
+        old: oldPlan.price,
+        new: newPlan.price,
+        difference: newPlan.price - oldPlan.price
+      }
     });
 
     res.json({
       success: true,
-      message: 'Subscription updated successfully',
+      message: `Subscription updated successfully from ${oldPlan.name} to ${newPlan.name}`,
       data: subscription
     });
   } catch (error) {
@@ -213,22 +333,35 @@ const cancelSubscription = async (req, res) => {
   try {
     const userId = req.params.userId;
 
-    // Find user's active subscription
+    // Find user's subscription and populate plan details
     const subscription = await Subscription.findOne({ 
-      userId,
-      status: 'ACTIVE'
-    });
+      userId
+    }).populate('planId');
 
     if (!subscription) {
       return res.status(404).json({
         success: false,
-        message: 'No active subscription found'
+        message: 'No subscription found for this user'
       });
     }
 
-    // Get user and plan details
+    // Check if subscription is already cancelled or expired
+    if (subscription.status === 'CANCELLED') {
+      return res.status(400).json({
+        success: false,
+        message: 'Subscription is already cancelled'
+      });
+    }
+
+    if (subscription.status === 'EXPIRED') {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot cancel an expired subscription'
+      });
+    }
+
+    // Get user details
     const user = await User.findById(userId);
-    const plan = await Plan.findById(subscription.planId);
 
     // Update subscription status
     subscription.status = 'CANCELLED';
@@ -239,13 +372,14 @@ const cancelSubscription = async (req, res) => {
       type: 'subscription_cancelled',
       email: user.email,
       name: user.name,
-      planName: plan.name,
-      cancelDate: new Date().toISOString()
+      planName: subscription.planId.name,
+      cancelDate: new Date().toISOString(),
+      endDate: subscription.endDate.toISOString() // Adding end date to show when service access ends
     });
 
     res.json({
       success: true,
-      message: 'Subscription cancelled successfully',
+      message: 'Subscription cancelled successfully. Service access will continue until ' + subscription.endDate.toISOString(),
       data: subscription
     });
   } catch (error) {
@@ -262,11 +396,24 @@ const reactivateSubscription = async (req, res) => {
     const { planId } = req.body;
     const userId = req.params.userId;
 
+    // First check if user has any active subscription
+    const activeSubscription = await Subscription.findOne({
+      userId,
+      status: 'ACTIVE'
+    });
+
+    if (activeSubscription) {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot reactivate: User already has an active subscription'
+      });
+    }
+
     // Find user's cancelled or expired subscription
     const subscription = await Subscription.findOne({ 
       userId,
       status: { $in: ['CANCELLED', 'EXPIRED'] }
-    });
+    }).populate('planId'); // Populate old plan details
 
     if (!subscription) {
       return res.status(404).json({
@@ -275,21 +422,22 @@ const reactivateSubscription = async (req, res) => {
       });
     }
 
+    // Store old plan details for response
+    const oldPlan = subscription.planId;
+    const oldStatus = subscription.status;
+
     // Check if plan exists
-    const plan = await Plan.findById(planId);
-    if (!plan) {
+    const newPlan = await Plan.findById(planId);
+    if (!newPlan) {
       return res.status(404).json({
         success: false,
         message: 'Plan not found'
       });
     }
 
-    // Get user details
-    const user = await User.findById(userId);
-
     // Calculate new dates
     const startDate = new Date();
-    const endDate = new Date(startDate.getTime() + (plan.duration * 24 * 60 * 60 * 1000));
+    const endDate = new Date(startDate.getTime() + (newPlan.duration * 24 * 60 * 60 * 1000));
 
     // Update subscription
     subscription.planId = planId;
@@ -298,21 +446,16 @@ const reactivateSubscription = async (req, res) => {
     subscription.status = 'ACTIVE';
 
     await subscription.save();
-
-    // Add email notification to queue
-    await addEmailJob({
-      type: 'subscription_created',
-      email: user.email,
-      name: user.name,
-      planName: plan.name,
-      startDate: startDate.toISOString(),
-      endDate: endDate.toISOString()
-    });
+    await subscription.populate('planId'); // Populate new plan details
 
     res.json({
       success: true,
-      message: 'Subscription reactivated successfully',
-      data: subscription
+      message: `Subscription reactivated successfully. Changed from ${oldPlan.name} to ${newPlan.name}`,
+      data: {
+        ...subscription.toObject(),
+        previousStatus: oldStatus,
+        priceChange: newPlan.price - oldPlan.price
+      }
     });
   } catch (error) {
     console.error('Reactivate subscription error:', error);
