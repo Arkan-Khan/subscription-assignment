@@ -232,7 +232,7 @@ const updateSubscription = async (req, res) => {
     const subscription = await Subscription.findOne({ 
       userId,
       status: 'ACTIVE'
-    }).populate('planId');
+    });
 
     if (!subscription) {
       return res.status(404).json({
@@ -242,14 +242,23 @@ const updateSubscription = async (req, res) => {
     }
 
     // Check if trying to update to the same plan
-    if (subscription.planId._id.toString() === planId) {
+    if (subscription.planId.toString() === planId) {
       return res.status(400).json({
         success: false,
         message: 'You are already subscribed to this plan'
       });
     }
 
-    // Check if plan exists and is active
+    // Get current plan details
+    const currentPlan = await Plan.findById(subscription.planId);
+    if (!currentPlan) {
+      return res.status(400).json({
+        success: false,
+        message: 'Current plan details not found'
+      });
+    }
+
+    // Check if new plan exists and is active
     const newPlan = await Plan.findById(planId);
     if (!newPlan) {
       return res.status(404).json({
@@ -275,9 +284,12 @@ const updateSubscription = async (req, res) => {
 
     // Get user details
     const user = await User.findById(userId);
-
-    // Store old plan details for email notification
-    const oldPlan = subscription.planId;
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
 
     // Calculate new end date
     const startDate = new Date();
@@ -297,28 +309,32 @@ const updateSubscription = async (req, res) => {
     subscription.endDate = endDate;
 
     await subscription.save();
-    await subscription.populate('planId'); // Repopulate with new plan details
 
     // Add email notification to queue
     await addEmailJob({
       type: 'subscription_updated',
       email: user.email,
       name: user.name,
-      oldPlanName: oldPlan.name,
+      oldPlanName: currentPlan.name,
       newPlanName: newPlan.name,
       startDate: startDate.toISOString(),
       endDate: endDate.toISOString(),
       priceChange: {
-        old: oldPlan.price,
+        old: currentPlan.price,
         new: newPlan.price,
-        difference: newPlan.price - oldPlan.price
+        difference: newPlan.price - currentPlan.price
       }
     });
 
+    // Get full subscription details for response
+    const updatedSubscription = await Subscription.findById(subscription._id)
+      .populate('planId')
+      .populate('userId', 'name email');
+
     res.json({
       success: true,
-      message: `Subscription updated successfully from ${oldPlan.name} to ${newPlan.name}`,
-      data: subscription
+      message: `Subscription updated successfully from ${currentPlan.name} to ${newPlan.name}`,
+      data: updatedSubscription
     });
   } catch (error) {
     console.error('Update subscription error:', error);

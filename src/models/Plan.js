@@ -17,6 +17,10 @@ const planSchema = new mongoose.Schema({
   duration: {
     type: Number, // in days
     required: true
+  },
+  isActive: {
+    type: Boolean,
+    default: true
   }
 }, {
   timestamps: true
