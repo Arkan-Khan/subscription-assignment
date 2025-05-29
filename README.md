@@ -20,17 +20,17 @@ This microservice handles complete subscription lifecycle management including u
 
 ### Key Capabilities
 - JWT-based user authentication with secure password handling
-- Complete subscription lifecycle (create, update, cancel, reactivate, auto-expire)
+- Complete subscription lifecycle (create, update, cancel, expire)
 - Automated email notifications with HTML templates and queue processing
 - Redis-based caching and FIFO message queue
-- CRON-based automatic subscription expiration
+- CRON-based automatic subscription expiration for active subscriptions
 - Comprehensive subscription history and analytics
 
 ## 🌐 Hosted API
 
 The API is hosted on multiple platforms for reliability and performance:
 
-### Primary Deployment (Railway - Recommended)
+### Primary Deployment (Railway)
 ```
 https://subscription-assignment-production.up.railway.app/
 ```
@@ -134,17 +134,6 @@ Content-Type: application/json
 ```http
 DELETE https://subscription-assignment-production.up.railway.app/api/subscriptions/:userId
 Authorization: Bearer <jwt-token>
-```
-
-5. **Reactivate Subscription**
-```http
-POST https://subscription-assignment-production.up.railway.app/api/subscriptions/:userId/reactivate
-Authorization: Bearer <jwt-token>
-Content-Type: application/json
-
-{
-  "planId": "plan-id"
-}
 ```
 
 ### Plan Management Endpoints
@@ -294,8 +283,8 @@ The system follows Clean Architecture principles with clear separation of concer
 - **Token expiration** handling with configurable expiry
 
 ### Subscription Management
-- **Full lifecycle management**: Create → Active → Update/Cancel → Expire → Reactivate
-- **Automatic expiration**: CRON job checks every 30 seconds for expired subscriptions
+- **Full lifecycle management**: Create → Active → Update/Cancel → Expire
+- **Automatic expiration**: CRON job checks every 30 seconds for expired active subscriptions
 - **History tracking**: Complete audit trail of all subscription changes
 - **Plan flexibility**: Upgrades, downgrades, and plan switching support
 
@@ -428,33 +417,6 @@ Response:
 }
 ```
 
-#### Reactivate Subscription
-```http
-POST /api/subscriptions/:userId/reactivate
-Authorization: Bearer <jwt-token>
-Content-Type: application/json
-
-{
-  "planId": "plan-id"
-}
-```
-
-Response:
-```json
-{
-  "success": true,
-  "message": "Subscription reactivated successfully. Changed from Basic Plan to Premium Plan",
-  "data": {
-    "_id": "subscription-id",
-    "status": "ACTIVE",
-    "startDate": "2024-03-20T10:00:00.000Z",
-    "endDate": "2024-04-19T10:00:00.000Z",
-    "previousStatus": "CANCELLED",
-    "priceChange": 10.00
-  }
-}
-```
-
 ### Validation Rules
 
 1. **Plan Updates**
@@ -466,12 +428,6 @@ Response:
    - Cannot cancel already CANCELLED subscription
    - Cannot cancel EXPIRED subscription
    - Access continues until original end date
-
-3. **Reactivation**
-   - Cannot reactivate if user has an ACTIVE subscription
-   - Only CANCELLED or EXPIRED subscriptions can be reactivated
-   - New plan must be active
-   - No email notification sent
 
 ### Plan Management
 
@@ -491,9 +447,7 @@ stateDiagram-v2
     [*] --> ACTIVE : Create Subscription
     ACTIVE --> CANCELLED : User Cancels
     ACTIVE --> EXPIRED : Auto-Expire (CRON)
-    CANCELLED --> EXPIRED : Auto-Expire (CRON)
-    EXPIRED --> ACTIVE : Reactivate (if no active subscription)
-    CANCELLED --> ACTIVE : Reactivate (if no active subscription)
+    CANCELLED --> EXPIRED : 
     ACTIVE --> ACTIVE : Update Plan (different plan only)
 ```
 
@@ -507,13 +461,12 @@ stateDiagram-v2
 
 2. **CANCELLED Subscriptions**
    - Maintain access until original end_date
-   - Cannot be updated (must reactivate)
+   - Cannot be updated
    - Cannot be cancelled again
-   - Auto-expire to EXPIRED when end_date reached
+   - Transitions to EXPIRED when end_date is reached
 
 3. **EXPIRED Subscriptions**
    - No service access
-   - Can be reactivated if no active subscription exists
    - Can create new subscription if no active/cancelled exists
 
 ## System Workflows
@@ -530,7 +483,7 @@ stateDiagram-v2
 4. Process email notification asynchronously
 
 ### Automatic Expiration Flow (CRON Job - Every 30 seconds)
-1. Query for subscriptions where `end_date <= current_time` and `status IN ['ACTIVE', 'CANCELLED']`
+1. Query for subscriptions where `end_date <= current_time` and `status = 'ACTIVE'`
 2. Update status to 'EXPIRED' → Add expiration email to queue
 3. Log expiration events → Update user access permissions
 

@@ -10,9 +10,10 @@ const checkAndUpdateExpiredSubscriptions = async () => {
     console.log('🔍 Checking for expired subscriptions...');
     const now = new Date();
 
-    // Find all active subscriptions that have passed their end date
+    // Find only ACTIVE subscriptions that have passed their end date
+    // CANCELLED subscriptions don't need to be auto-expired
     const expiredSubscriptions = await Subscription.find({
-      status: 'ACTIVE',
+      status: 'ACTIVE', // Only check active subscriptions
       endDate: { $lt: now }
     }).populate('userId').populate('planId');
 

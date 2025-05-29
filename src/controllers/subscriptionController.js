@@ -50,24 +50,17 @@ const createSubscription = async (req, res) => {
       });
     }
 
-    // Check if user has any subscription (active, cancelled, or expired)
-    const existingSubscription = await Subscription.findOne({ 
+    // Check if user has an active subscription
+    const activeSubscription = await Subscription.findOne({ 
       userId,
-      status: { $nin: ['EXPIRED'] } // Only allow if all subscriptions are expired
+      status: 'ACTIVE'
     });
     
-    if (existingSubscription) {
-      if (existingSubscription.status === 'ACTIVE') {
-        return res.status(400).json({
-          success: false,
-          message: 'User already has an active subscription'
-        });
-      } else if (existingSubscription.status === 'CANCELLED') {
-        return res.status(400).json({
-          success: false,
-          message: 'User has a cancelled subscription. Please wait for it to expire or use the reactivate endpoint'
-        });
-      }
+    if (activeSubscription) {
+      return res.status(400).json({
+        success: false,
+        message: 'User already has an active subscription. Please cancel or wait for current subscription to expire.'
+      });
     }
 
     // Validate plan duration
@@ -351,36 +344,24 @@ const cancelSubscription = async (req, res) => {
 
     // Find user's subscription and populate plan details
     const subscription = await Subscription.findOne({ 
-      userId
+      userId,
+      status: 'ACTIVE' // Only active subscriptions can be cancelled
     }).populate('planId');
 
     if (!subscription) {
       return res.status(404).json({
         success: false,
-        message: 'No subscription found for this user'
-      });
-    }
-
-    // Check if subscription is already cancelled or expired
-    if (subscription.status === 'CANCELLED') {
-      return res.status(400).json({
-        success: false,
-        message: 'Subscription is already cancelled'
-      });
-    }
-
-    if (subscription.status === 'EXPIRED') {
-      return res.status(400).json({
-        success: false,
-        message: 'Cannot cancel an expired subscription'
+        message: 'No active subscription found for this user'
       });
     }
 
     // Get user details
     const user = await User.findById(userId);
 
-    // Update subscription status
+    // Update subscription status and end date to now
     subscription.status = 'CANCELLED';
+    subscription.endDate = new Date(); // Immediately end the subscription
+
     await subscription.save();
 
     // Add email notification to queue
@@ -390,12 +371,12 @@ const cancelSubscription = async (req, res) => {
       name: user.name,
       planName: subscription.planId.name,
       cancelDate: new Date().toISOString(),
-      endDate: subscription.endDate.toISOString() // Adding end date to show when service access ends
+      message: 'Your subscription has been cancelled and service access has ended immediately.'
     });
 
     res.json({
       success: true,
-      message: 'Subscription cancelled successfully. Service access will continue until ' + subscription.endDate.toISOString(),
+      message: 'Subscription cancelled successfully. Service access has ended.',
       data: subscription
     });
   } catch (error) {
@@ -407,85 +388,9 @@ const cancelSubscription = async (req, res) => {
   }
 };
 
-const reactivateSubscription = async (req, res) => {
-  try {
-    const { planId } = req.body;
-    const userId = req.params.userId;
-
-    // First check if user has any active subscription
-    const activeSubscription = await Subscription.findOne({
-      userId,
-      status: 'ACTIVE'
-    });
-
-    if (activeSubscription) {
-      return res.status(400).json({
-        success: false,
-        message: 'Cannot reactivate: User already has an active subscription'
-      });
-    }
-
-    // Find user's cancelled or expired subscription
-    const subscription = await Subscription.findOne({ 
-      userId,
-      status: { $in: ['CANCELLED', 'EXPIRED'] }
-    }).populate('planId'); // Populate old plan details
-
-    if (!subscription) {
-      return res.status(404).json({
-        success: false,
-        message: 'No cancelled or expired subscription found'
-      });
-    }
-
-    // Store old plan details for response
-    const oldPlan = subscription.planId;
-    const oldStatus = subscription.status;
-
-    // Check if plan exists
-    const newPlan = await Plan.findById(planId);
-    if (!newPlan) {
-      return res.status(404).json({
-        success: false,
-        message: 'Plan not found'
-      });
-    }
-
-    // Calculate new dates
-    const startDate = new Date();
-    const endDate = new Date(startDate.getTime() + (newPlan.duration * 24 * 60 * 60 * 1000));
-
-    // Update subscription
-    subscription.planId = planId;
-    subscription.startDate = startDate;
-    subscription.endDate = endDate;
-    subscription.status = 'ACTIVE';
-
-    await subscription.save();
-    await subscription.populate('planId'); // Populate new plan details
-
-    res.json({
-      success: true,
-      message: `Subscription reactivated successfully. Changed from ${oldPlan.name} to ${newPlan.name}`,
-      data: {
-        ...subscription.toObject(),
-        previousStatus: oldStatus,
-        priceChange: newPlan.price - oldPlan.price
-      }
-    });
-  } catch (error) {
-    console.error('Reactivate subscription error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error'
-    });
-  }
-};
-
 module.exports = {
   createSubscription,
   getUserSubscription,
   updateSubscription,
-  cancelSubscription,
-  reactivateSubscription
+  cancelSubscription
 }; 
