@@ -28,21 +28,37 @@ This microservice handles complete subscription lifecycle management including u
 
 ## 🌐 Hosted API
 
-The API is hosted and ready to use at:
+The API is hosted on multiple platforms for reliability and performance:
+
+### Primary Deployment (Railway - Recommended)
+```
+https://subscription-assignment-production.up.railway.app/
+```
+
+Health check endpoint:
+```
+https://subscription-assignment-production.up.railway.app/health
+```
+
+### Secondary Deployment (Render)
 ```
 https://subscription-assignment.onrender.com/
 ```
-go to this url for health check: 
+
+Health check endpoint:
 ```
 https://subscription-assignment.onrender.com/health
 ```
+
+> **Note**: The Railway deployment is recommended as the primary endpoint due to more reliable uptime. The Render deployment may experience cold starts and automatic shutdowns after 15 minutes of inactivity on the free tier, which can cause brief delays in API responses.
+
 You can directly test the endpoints using Postman without local setup. All endpoints are prefixed with the base URL.
 
 ### Quick Start with Hosted API
 
 1. **Register a User**
 ```http
-POST https://subscription-assignment.onrender.com/api/auth/signup
+POST https://subscription-assignment-production.up.railway.app/api/auth/signup
 Content-Type: application/json
 
 {
@@ -63,7 +79,7 @@ Authorization: Bearer your-jwt-token
 
 1. **Sign Up**
 ```http
-POST https://subscription-assignment.onrender.com/api/auth/signup
+POST https://subscription-assignment-production.up.railway.app/api/auth/signup
 Content-Type: application/json
 
 {
@@ -75,7 +91,7 @@ Content-Type: application/json
 
 2. **Login**
 ```http
-POST https://subscription-assignment.onrender.com/api/auth/login
+POST https://subscription-assignment-production.up.railway.app/api/auth/login
 Content-Type: application/json
 
 {
@@ -88,7 +104,7 @@ Content-Type: application/json
 
 1. **Create Subscription**
 ```http
-POST https://subscription-assignment.onrender.com/api/subscriptions/:userId
+POST https://subscription-assignment-production.up.railway.app/api/subscriptions/:userId
 Authorization: Bearer <jwt-token>
 Content-Type: application/json
 
@@ -99,13 +115,13 @@ Content-Type: application/json
 
 2. **Get User's Subscription History**
 ```http
-GET https://subscription-assignment.onrender.com/api/subscriptions/:userId
+GET https://subscription-assignment-production.up.railway.app/api/subscriptions/:userId
 Authorization: Bearer <jwt-token>
 ```
 
 3. **Update Subscription Plan**
 ```http
-PUT https://subscription-assignment.onrender.com/api/subscriptions/:userId
+PUT https://subscription-assignment-production.up.railway.app/api/subscriptions/:userId
 Authorization: Bearer <jwt-token>
 Content-Type: application/json
 
@@ -116,13 +132,13 @@ Content-Type: application/json
 
 4. **Cancel Subscription**
 ```http
-DELETE https://subscription-assignment.onrender.com/api/subscriptions/:userId
+DELETE https://subscription-assignment-production.up.railway.app/api/subscriptions/:userId
 Authorization: Bearer <jwt-token>
 ```
 
 5. **Reactivate Subscription**
 ```http
-POST https://subscription-assignment.onrender.com/api/subscriptions/:userId/reactivate
+POST https://subscription-assignment-production.up.railway.app/api/subscriptions/:userId/reactivate
 Authorization: Bearer <jwt-token>
 Content-Type: application/json
 
@@ -135,7 +151,7 @@ Content-Type: application/json
 
 1. **Get All Plans**
 ```http
-GET https://subscription-assignment.onrender.com/api/plans
+GET https://subscription-assignment-production.up.railway.app/api/plans
 Authorization: Bearer <jwt-token>
 ```
 
